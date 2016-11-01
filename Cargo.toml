@@ -1,0 +1,15 @@
+[package]
+name = "sv-map-viewer"
+version = "0.1.0"
+authors = ["Josh Matthews <josh@joshmatthews.net>"]
+
+[[bin]]
+name = "spinning-square"
+
+[dependencies]
+image = "0.10.3"
+xnb = {path = "../xnb"}
+piston = "0.26.0"
+piston2d-graphics = "0.18.0"
+pistoncore-glutin_window = "0.31.0"
+piston2d-opengl_graphics = "0.35.0"
