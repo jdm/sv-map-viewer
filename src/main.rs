@@ -19,12 +19,13 @@ use std::path::Path;
 use xnb::{XNB, Asset};
 use xnb::tide::{TileSheet, Layer};
 
-const SCALE: f64 = 2.0;
+const SCALE: f64 = 1.0;
 
 pub struct App {
     gl: GlGraphics,
     view_x: u32,
     view_y: u32,
+    ticks: u32,
 }
 
 struct Tile<'a> {
@@ -97,10 +98,16 @@ impl App {
               layers: &[Layer]) {
         use graphics::*;
 
-        const BLACK: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+        const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
         let view_x = self.view_x;
         let view_y = self.view_y;
+
+        let view_w = args.viewport().window_size[0] / 16 + view_x;
+        let view_h = args.viewport().window_size[1] / 16 + view_y;
+
+        let ticks = self.ticks;
+
         self.gl.draw(args.viewport(), |c, gl| {
             // Clear the screen.
             clear(BLACK, gl);
@@ -115,10 +122,10 @@ impl App {
                     let tilesheet = tilesheets.iter().find(|s| s.id == tilesheet_name).expect("no tilesheet");
                     let tile = Tile {
                         sheet: tilesheet,
-                        index: base_tile.get_index(),
+                        index: base_tile.get_index(ticks),
                     };
                     let (x, y) = base_tile.get_pos();
-                    if x < view_x || y < view_y {
+                    if x < view_x || x > view_w || y < view_y || y > view_h {
                         continue;
                     }
                     let image = image_for_tile(&tile, (x, y), (view_x, view_y));
@@ -128,7 +135,7 @@ impl App {
             }
 
             let view = (view_x, view_y);
-            let pos = (5, 5);
+            let pos = (10, 15);
 
             let transform = c.transform.zoom(SCALE);
 
@@ -164,9 +171,8 @@ impl App {
         });
     }
 
-    fn update(&mut self, _args: &UpdateArgs) {
-        // Rotate 2 radians per second.
-        //self.rotation += 2.0 * args.dt;
+    fn update(&mut self, args: &UpdateArgs) {
+        self.ticks += (args.dt * 1000.) as u32;
     }
 }
 
@@ -245,6 +251,7 @@ fn main() {
         gl: GlGraphics::new(opengl),
         view_x: 0,
         view_y: 0,
+        ticks: 0,
     };
 
     let mut events = window.events();
