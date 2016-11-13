@@ -19,13 +19,17 @@ use std::path::Path;
 use xnb::{XNB, Asset};
 use xnb::tide::{TileSheet, Layer};
 
-const SCALE: f64 = 1.0;
+const SCALE: f64 = 1.5;
 
 pub struct App {
     gl: GlGraphics,
     view_x: u32,
     view_y: u32,
     ticks: u32,
+    d_pressed: bool,
+    a_pressed: bool,
+    w_pressed: bool,
+    s_pressed: bool,
 }
 
 struct Tile<'a> {
@@ -47,13 +51,15 @@ fn image_for_tile(tile: &Tile, pos: (u32, u32), view: (u32, u32)) -> Image {
 
 fn image_for_texture(texture: &TextureTileInfo,
                      pos: (u32, u32),
-                     view: (u32, u32)) -> Image {
+                     view: (u32, u32),
+                     offset: (i32, i32)) -> Image {
     let num_h_tiles = texture.0.get_width() / 16;
+    let offset = ((texture.3).0 + offset.0, (texture.3).1 + offset.1);
     image_for_tile_reference(num_h_tiles,
                              texture.2.clone(),
                              texture.1,
                              pos,
-                             texture.3.clone(),
+                             offset,
                              view)
 }
 
@@ -87,7 +93,36 @@ struct Player {
     hat: TextureTileInfo,
     shirt: TextureTileInfo,
     accessory: TextureTileInfo,
+    x: u32,
+    y: u32,
+    offset_x: f64,
+    offset_y: f64,
 }
+
+impl Player {
+    fn move_horiz(&mut self, delta: f64) {
+        self.offset_x += delta;
+        if delta < 0. && self.offset_x < -8. {
+            self.offset_x = 8.;
+            self.x -= 1;
+        } else if delta > 0. && self.offset_x > 8. {
+            self.offset_x = -8.;
+            self.x += 1;
+        }
+    }
+
+    fn move_vert(&mut self, delta: f64) {
+        self.offset_y += delta;
+        if delta < 0. && self.offset_y < -8. {
+            self.offset_y = 8.;
+            self.y -= 1;
+        } else if delta > 0. && self.offset_y > 8. {
+            self.offset_y = -8.;
+            self.y += 1;
+        }
+    }
+}
+
 
 impl App {
     fn render(&mut self,
@@ -135,44 +170,57 @@ impl App {
             }
 
             let view = (view_x, view_y);
-            let pos = (10, 15);
+            let pos = (player.x, player.y);
+            let offset = (player.offset_x as i32, player.offset_y as i32);
 
             let transform = c.transform.zoom(SCALE);
 
             // Body
-            let image = image_for_texture(&player.base, pos, view);
+            let image = image_for_texture(&player.base, pos, view, offset);
             image.draw(&player.base.0, &Default::default(), transform, gl);
-            let image = image_for_texture(&player.bottom, pos, view);
+            let image = image_for_texture(&player.bottom, pos, view, offset);
             image.draw(&player.bottom.0, &Default::default(), transform, gl);
 
             // Hair
-            let image = image_for_texture(&player.hairstyle, pos, view);
+            let image = image_for_texture(&player.hairstyle, pos, view, offset);
             image.draw(&player.hairstyle.0, &Default::default(), transform, gl);
 
             // Hat
-            let image = image_for_texture(&player.hat, pos, view);
+            let image = image_for_texture(&player.hat, pos, view, offset);
             image.draw(&player.hat.0, &Default::default(), transform, gl);
 
             // Arms
-            let image = image_for_texture(&player.arms, pos, view);
+            let image = image_for_texture(&player.arms, pos, view, offset);
             image.draw(&player.arms.0, &Default::default(), transform, gl);
 
             // Pants
-            let image = image_for_texture(&player.pants, pos, view);
+            let image = image_for_texture(&player.pants, pos, view, offset);
             image.draw(&player.pants.0, &Default::default(), transform, gl);
 
             // Shirt
-            let image = image_for_texture(&player.shirt, pos, view);
+            let image = image_for_texture(&player.shirt, pos, view, offset);
             image.draw(&player.shirt.0, &Default::default(), transform, gl);
 
             // Facial accessory
-            let image = image_for_texture(&player.accessory, pos, view);
+            let image = image_for_texture(&player.accessory, pos, view, offset);
             image.draw(&player.accessory.0, &Default::default(), transform, gl);
         });
     }
 
-    fn update(&mut self, args: &UpdateArgs) {
+    fn update(&mut self, args: &UpdateArgs, player: &mut Player) {
         self.ticks += (args.dt * 1000.) as u32;
+
+        const MOVE_AMOUNT: f64 = 100.0;
+        if self.a_pressed {
+            player.move_horiz(-MOVE_AMOUNT * args.dt);
+        } else if self.d_pressed {
+            player.move_horiz(MOVE_AMOUNT * args.dt);
+        }
+        if self.w_pressed {
+            player.move_vert(-MOVE_AMOUNT * args.dt)
+        } else if self.s_pressed {
+            player.move_vert(MOVE_AMOUNT * args.dt)
+        }
     }
 }
 
@@ -235,7 +283,7 @@ fn main() {
     let hat = load_texture(path, "hats.xnb");
     let shirt = load_texture(path, "shirts.xnb");
     let accessory = load_texture(path, "accessories.xnb");
-    let player = Player {
+    let mut player = Player {
         base: (base, 0, (16, 16), (0, 0)),
         bottom: (bottom, 24, (16, 16), (0, 16)),
         arms: (arms, 30, (16, 16), (0, 16)),
@@ -244,6 +292,10 @@ fn main() {
         pants: (pants, 42, (16, 16), (0, 16)),
         shirt: (shirt, 0, (8, 8), (4, 15)),
         accessory: (accessory, 0, (16, 16), (0, 3)),
+        x: 10,
+        y: 15,
+        offset_x: 0.,
+        offset_y: 0.,
     };
 
     // Create a new game and run it.
@@ -252,6 +304,10 @@ fn main() {
         view_x: 0,
         view_y: 0,
         ticks: 0,
+        a_pressed: false,
+        d_pressed: false,
+        w_pressed: false,
+        s_pressed: false,
     };
 
     let mut events = window.events();
@@ -262,6 +318,20 @@ fn main() {
                 Key::Right => app.view_x += 1,
                 Key::Up if app.view_y > 0 => app.view_y -= 1,
                 Key::Down => app.view_y += 1,
+                Key::A => app.a_pressed = true,
+                Key::D => app.d_pressed = true,
+                Key::W => app.w_pressed = true,
+                Key::S => app.s_pressed = true,
+                _ => {}
+            }
+        }
+
+        if let Some(Button::Keyboard(k)) = e.release_args() {
+            match k {
+                Key::A => app.a_pressed = false,
+                Key::D => app.d_pressed = false,
+                Key::W => app.w_pressed = false,
+                Key::S => app.s_pressed = false,
                 _ => {}
             }
         }
@@ -271,7 +341,7 @@ fn main() {
         }
 
         if let Some(u) = e.update_args() {
-            app.update(&u);
+            app.update(&u, &mut player);
         }
     }
 }
