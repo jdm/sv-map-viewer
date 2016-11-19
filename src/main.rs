@@ -45,39 +45,66 @@ fn image_for_tile(tile: &Tile, pos: (u32, u32), view: (u32, u32)) -> Image {
     image_for_tile_reference(num_h_tiles,
                              (tile_w, tile_h),
                              tile.index,
+                             0,
                              pos,
                              (0, 0),
-                             view)
+                             view,
+                             false)
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum PlayerDir {
+    Down,
+    Right,
+    Up,
+    Left,
 }
 
 fn image_for_texture(texture: &TextureTileInfo,
                      pos: (u32, u32),
                      view: (u32, u32),
                      offset: (i32, i32),
-                     anim: Option<(u32, u32)>) -> Image {
-    let num_h_tiles = texture.0.get_width() / 16;
+                     anim: Option<(u32, u32)>,
+                     dir: Option<PlayerDir>) -> Image {
+    let num_h_tiles = texture.0.get_width() / (texture.2).0;
     let offset = ((texture.3).0 + offset.0, (texture.3).1 + offset.1);
+    let base = dir.map_or(0, |d| match d {
+        PlayerDir::Down => 0,
+        PlayerDir::Right | PlayerDir::Left => 2,
+        PlayerDir::Up => 4,
+    });
+    let flip = dir.map_or(false, |d| d == PlayerDir::Left);
+    let anim_idx = anim.map_or(0, |a| a.0 / 150 % a.1);
     image_for_tile_reference(num_h_tiles,
                              texture.2.clone(),
-                             texture.1 + anim.map_or(0, |a| (a.0 / 150) % a.1),
+                             texture.1 + anim_idx,
+                             base,
                              pos,
                              offset,
-                             view)
+                             view,
+                             flip)
 }
 
 fn image_for_tile_reference(num_h_tiles: u32,
                             (tile_w, tile_h): (u32, u32),
                             index: u32,
+                            index_y_offset: u32,
                             (x, y): (u32, u32),
                             (off_x, off_y): (i32, i32),
-                            (view_x, view_y): (u32, u32)) -> Image {
+                            (view_x, view_y): (u32, u32),
+                            flip_h: bool) -> Image {
     let src_x = index % num_h_tiles * tile_w;
-    let src_y = index / num_h_tiles * tile_h;
+    let src_y = (index / num_h_tiles + index_y_offset) * tile_h;
+    let src_rect = if flip_h {
+        [src_x as i32 + tile_w as i32,
+         src_y as i32,
+         -(tile_w as i32),
+         tile_h as i32]
+    } else {
+        [src_x as i32, src_y as i32, tile_w as i32, tile_h as i32]
+    };
     Image::new()
-        .src_rect([src_x as i32,
-                   src_y as i32,
-                   tile_w as i32,
-                   tile_h as i32])
+        .src_rect(src_rect)
         .rect([((x - view_x) * 16) as f64 + off_x as f64,
                ((y - view_y) * 16) as f64 + off_y as f64,
                tile_w as f64,
@@ -100,6 +127,7 @@ struct Player {
     offset_x: f64,
     offset_y: f64,
     last_move_start: Option<u32>,
+    dir: PlayerDir,
 }
 
 impl Player {
@@ -176,7 +204,8 @@ impl App {
             let pos = (player.x, player.y);
             let offset = (player.offset_x as i32, player.offset_y as i32);
 
-            let transform = c.transform.zoom(SCALE);
+            let transform = c.transform.clone().zoom(SCALE);
+            let maybe_flipped = transform.clone();
 
             let player_ticks = match player.last_move_start {
                 Some(start) => ticks - start,
@@ -184,33 +213,33 @@ impl App {
             };
 
             // Body
-            let image = image_for_texture(&player.base, pos, view, offset, Some((player_ticks, 3)));
-            image.draw(&player.base.0, &Default::default(), transform, gl);
-            let image = image_for_texture(&player.bottom, pos, view, offset, Some((player_ticks, 3)));
-            image.draw(&player.bottom.0, &Default::default(), transform, gl);
+            let image = image_for_texture(&player.base, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
+            image.draw(&player.base.0, &Default::default(), maybe_flipped, gl);
+            let image = image_for_texture(&player.bottom, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
+            image.draw(&player.bottom.0, &Default::default(), maybe_flipped, gl);
 
             // Hair
-            let image = image_for_texture(&player.hairstyle, pos, view, offset, None);
-            image.draw(&player.hairstyle.0, &Default::default(), transform, gl);
+            let image = image_for_texture(&player.hairstyle, pos, view, offset, None, Some(player.dir));
+            image.draw(&player.hairstyle.0, &Default::default(), maybe_flipped, gl);
 
             // Hat
-            let image = image_for_texture(&player.hat, pos, view, offset, None);
+            let image = image_for_texture(&player.hat, pos, view, offset, None, None);
             image.draw(&player.hat.0, &Default::default(), transform, gl);
 
             // Arms
-            let image = image_for_texture(&player.arms, pos, view, offset, Some((player_ticks, 3)));
-            image.draw(&player.arms.0, &Default::default(), transform, gl);
+            let image = image_for_texture(&player.arms, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
+            image.draw(&player.arms.0, &Default::default(), maybe_flipped, gl);
 
             // Pants
-            let image = image_for_texture(&player.pants, pos, view, offset, Some((player_ticks, 3)));
-            image.draw(&player.pants.0, &Default::default(), transform, gl);
+            let image = image_for_texture(&player.pants, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
+            image.draw(&player.pants.0, &Default::default(), maybe_flipped, gl);
 
             // Shirt
-            let image = image_for_texture(&player.shirt, pos, view, offset, None);
+            let image = image_for_texture(&player.shirt, pos, view, offset, None, None);
             image.draw(&player.shirt.0, &Default::default(), transform, gl);
 
             // Facial accessory
-            let image = image_for_texture(&player.accessory, pos, view, offset, None);
+            let image = image_for_texture(&player.accessory, pos, view, offset, None, None);
             image.draw(&player.accessory.0, &Default::default(), transform, gl);
         });
     }
@@ -250,6 +279,18 @@ impl App {
         if self.update_last_move {
             self.update_last_move = false;
             if self.a_pressed || self.d_pressed || self.s_pressed || self.w_pressed {
+                if self.w_pressed {
+                    player.dir = PlayerDir::Up;
+                }
+                if self.s_pressed {
+                    player.dir = PlayerDir::Down;
+                }
+                if self.a_pressed {
+                    player.dir = PlayerDir::Left;
+                }
+                if self.d_pressed {
+                    player.dir = PlayerDir::Right;
+                }
                 player.last_move_start = Some(self.ticks);
             } else {
                 player.last_move_start = None;
@@ -343,6 +384,7 @@ fn main() {
         offset_x: 0.,
         offset_y: 0.,
         last_move_start: None,
+        dir: PlayerDir::Down,
     };
 
     // Create a new game and run it.
