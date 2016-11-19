@@ -30,6 +30,7 @@ pub struct App {
     a_pressed: bool,
     w_pressed: bool,
     s_pressed: bool,
+    update_last_move: bool,
 }
 
 struct Tile<'a> {
@@ -52,12 +53,13 @@ fn image_for_tile(tile: &Tile, pos: (u32, u32), view: (u32, u32)) -> Image {
 fn image_for_texture(texture: &TextureTileInfo,
                      pos: (u32, u32),
                      view: (u32, u32),
-                     offset: (i32, i32)) -> Image {
+                     offset: (i32, i32),
+                     anim: Option<(u32, u32)>) -> Image {
     let num_h_tiles = texture.0.get_width() / 16;
     let offset = ((texture.3).0 + offset.0, (texture.3).1 + offset.1);
     image_for_tile_reference(num_h_tiles,
                              texture.2.clone(),
-                             texture.1,
+                             texture.1 + anim.map_or(0, |a| (a.0 / 150) % a.1),
                              pos,
                              offset,
                              view)
@@ -97,6 +99,7 @@ struct Player {
     y: u32,
     offset_x: f64,
     offset_y: f64,
+    last_move_start: Option<u32>,
 }
 
 impl Player {
@@ -175,40 +178,83 @@ impl App {
 
             let transform = c.transform.zoom(SCALE);
 
+            let player_ticks = match player.last_move_start {
+                Some(start) => ticks - start,
+                None => 0,
+            };
+
             // Body
-            let image = image_for_texture(&player.base, pos, view, offset);
+            let image = image_for_texture(&player.base, pos, view, offset, Some((player_ticks, 3)));
             image.draw(&player.base.0, &Default::default(), transform, gl);
-            let image = image_for_texture(&player.bottom, pos, view, offset);
+            let image = image_for_texture(&player.bottom, pos, view, offset, Some((player_ticks, 3)));
             image.draw(&player.bottom.0, &Default::default(), transform, gl);
 
             // Hair
-            let image = image_for_texture(&player.hairstyle, pos, view, offset);
+            let image = image_for_texture(&player.hairstyle, pos, view, offset, None);
             image.draw(&player.hairstyle.0, &Default::default(), transform, gl);
 
             // Hat
-            let image = image_for_texture(&player.hat, pos, view, offset);
+            let image = image_for_texture(&player.hat, pos, view, offset, None);
             image.draw(&player.hat.0, &Default::default(), transform, gl);
 
             // Arms
-            let image = image_for_texture(&player.arms, pos, view, offset);
+            let image = image_for_texture(&player.arms, pos, view, offset, Some((player_ticks, 3)));
             image.draw(&player.arms.0, &Default::default(), transform, gl);
 
             // Pants
-            let image = image_for_texture(&player.pants, pos, view, offset);
+            let image = image_for_texture(&player.pants, pos, view, offset, Some((player_ticks, 3)));
             image.draw(&player.pants.0, &Default::default(), transform, gl);
 
             // Shirt
-            let image = image_for_texture(&player.shirt, pos, view, offset);
+            let image = image_for_texture(&player.shirt, pos, view, offset, None);
             image.draw(&player.shirt.0, &Default::default(), transform, gl);
 
             // Facial accessory
-            let image = image_for_texture(&player.accessory, pos, view, offset);
+            let image = image_for_texture(&player.accessory, pos, view, offset, None);
             image.draw(&player.accessory.0, &Default::default(), transform, gl);
         });
     }
 
+    fn key_released(&mut self, key: Key) {
+        match key {
+            Key::A => self.a_pressed = false,
+            Key::D => self.d_pressed = false,
+            Key::W => self.w_pressed = false,
+            Key::S => self.s_pressed = false,
+            _ => {}
+        }
+
+        self.update_last_move = true;
+    }
+
+    fn key_pressed(&mut self, key: Key) {
+        if key == Key::W && !self.w_pressed ||
+            key == Key::S && !self.s_pressed ||
+            key == Key::A && !self.a_pressed ||
+            key == Key::D && !self.d_pressed {
+            self.update_last_move = true
+        }
+
+        match key {
+            Key::A => self.a_pressed = true,
+            Key::D => self.d_pressed = true,
+            Key::S => self.s_pressed = true,
+            Key::W => self.w_pressed = true,
+            _ => {}
+        }
+    }
+
     fn update(&mut self, args: &UpdateArgs, player: &mut Player) {
         self.ticks += (args.dt * 1000.) as u32;
+
+        if self.update_last_move {
+            self.update_last_move = false;
+            if self.a_pressed || self.d_pressed || self.s_pressed || self.w_pressed {
+                player.last_move_start = Some(self.ticks);
+            } else {
+                player.last_move_start = None;
+            }
+        }
 
         const MOVE_AMOUNT: f64 = 100.0;
         if self.a_pressed {
@@ -296,6 +342,7 @@ fn main() {
         y: 15,
         offset_x: 0.,
         offset_y: 0.,
+        last_move_start: None,
     };
 
     // Create a new game and run it.
@@ -308,6 +355,7 @@ fn main() {
         d_pressed: false,
         w_pressed: false,
         s_pressed: false,
+        update_last_move: false,
     };
 
     let mut events = window.events();
@@ -318,22 +366,12 @@ fn main() {
                 Key::Right => app.view_x += 1,
                 Key::Up if app.view_y > 0 => app.view_y -= 1,
                 Key::Down => app.view_y += 1,
-                Key::A => app.a_pressed = true,
-                Key::D => app.d_pressed = true,
-                Key::W => app.w_pressed = true,
-                Key::S => app.s_pressed = true,
-                _ => {}
+                k => app.key_pressed(k),
             }
         }
 
         if let Some(Button::Keyboard(k)) = e.release_args() {
-            match k {
-                Key::A => app.a_pressed = false,
-                Key::D => app.d_pressed = false,
-                Key::W => app.w_pressed = false,
-                Key::S => app.s_pressed = false,
-                _ => {}
-            }
+            app.key_released(k);
         }
 
         if let Some(r) = e.render_args() {
