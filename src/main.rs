@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::path::Path;
-use xnb::{XNB, Asset};
+use xnb::{XNB, Asset, DictionaryKey};
 use xnb::tide::{TileSheet, Layer};
 
 const SCALE: f64 = 1.5;
@@ -329,6 +329,154 @@ impl App {
     }
 }
 
+struct ScriptedCharacter {
+    name: String,
+    pos: (u32, u32),
+    dir: u8,
+}
+
+enum Command {
+    Pause(u32),
+    Emote(String, u8),
+    Move(String, (i32, i32), u8),
+    Speak(String, String),
+    GlobalFade,
+    Viewport(i32, i32),
+    Warp(String, (i32, i32)),
+    FaceDirection(String, u8),
+    ShowFrame(String, u32),
+    Speed(String, u8),
+    PlaySound(String),
+    Shake(String, u32),
+    Jump(String),
+    TextAboveHead(String, String),
+    AddQuest(u32),
+    Message(String),
+    Animate(String, bool, bool, u32, Vec<u32>),
+    StopAnimation(String),
+    Mail(String),
+    Friendship(String, i32),
+    PlayMusic(String),
+    SpecificTemporarySprite(String),
+    ChangeLocation(String),
+    ChangeToTemporaryMap(String),
+    Question(String, String),
+    Fork(String),
+    AmbientLight(u32, u32, u32),
+    PositionOffset(String, i32, i32),
+}
+
+enum Trigger {
+}
+
+enum End {
+    WarpOut,
+    Dialogue(String, String),
+    Position((u32, u32)),
+    End,
+}
+
+struct ScriptedEvent {
+    id: String,
+    music: String,
+    viewport: (i32, i32),
+    characters: Vec<(String, (u32, u32), u8)>,
+    skippable: bool,
+    commands: Vec<Command>,
+    end: End,
+    triggers: Vec<Trigger>,
+    forks: Vec<ScriptedEvent>,
+}
+
+fn parse_script(id: String, s: String) -> ScriptedEvent {
+    let mut forks = s.split('\n');
+    let mut parts = forks.next().unwrap().split('/');
+    let music = parts.next().unwrap().to_owned();
+    let viewport_str = parts.next().unwrap();
+    let mut viewport_str = viewport_str.split(' ');
+    let viewport = (viewport_str.next().unwrap().parse().unwrap(),
+                    viewport_str.next().unwrap().parse().unwrap());
+    let mut character_parts = parts.next().unwrap().split(' ').peekable();
+
+    let mut characters = vec![];
+    while character_parts.peek().is_some() {
+        characters.push((character_parts.next().unwrap().to_owned(),
+                         (character_parts.next().unwrap().parse().unwrap(),
+                          character_parts.next().unwrap().parse().unwrap()),
+                         character_parts.next().unwrap().parse().unwrap()));
+    }
+
+    let mut peekable = parts.peekable();
+    let skippable = match peekable.peek() {
+        Some(&"skippable") => {
+            let _ = peekable.next();
+            true
+        }
+        Some(_) | None => false,
+    };
+
+    let mut commands = vec![];
+    for command_str in peekable {
+        let args: Vec<_> = command_str.split(' ').collect();
+        let command = match args[0] {
+            "pause" => Command::Pause(args[1].parse().unwrap()),
+            "emote" => Command::Emote(args[1].to_owned(), args[2].parse().unwrap()),
+            "move" => Command::Move(args[1].to_owned(),
+                                    (args[2].parse().unwrap(), args[3].parse().unwrap()),
+                                    args[4].parse().unwrap()),
+            "speak" => Command::Speak(args[1].to_owned(), args[2].to_owned()),
+            "globalFade" => Command::GlobalFade,
+            "viewport" => Command::Viewport(args[1].parse().unwrap(), args[2].parse().unwrap()),
+            "warp" => Command::Warp(args[1].to_owned(),
+                                    (args[2].parse().unwrap(), args[3].parse().unwrap())),
+            "faceDirection" => Command::FaceDirection(args[1].to_owned(), args[2].parse().unwrap()),
+            "showFrame" => Command::ShowFrame(args[1].to_owned(), args[2].parse().unwrap()),
+            "speed" => Command::Speed(args[1].to_owned(), args[2].parse().unwrap()),
+            "playSound" => Command::PlaySound(args[1].to_owned()),
+            "shake" => Command::Shake(args[1].to_owned(), args[2].parse().unwrap()),
+            "jump" => Command::Jump(args[1].to_owned()),
+            "textAboveHead" => Command::TextAboveHead(args[1].to_owned(), args[2].to_owned()),
+            "addQuest" => Command::AddQuest(args[1].parse().unwrap()),
+            "message" => Command::Message(args[1].to_owned()),
+            "animate" => Command::Animate(args[1].to_owned(),
+                                          args[2] == "t",
+                                          args[3] == "t",
+                                          args[4].parse().unwrap(),
+                                          args[5..].iter().map(|s| s.parse().unwrap()).collect()),
+            "stopAnimation" => Command::StopAnimation(args[1].to_owned()),
+            "mail" => Command::Mail(args[1].to_owned()),
+            "friendship" => Command::Friendship(args[1].to_owned(), args[2].parse().unwrap()),
+            "playMusic" => Command::PlayMusic(args[1].to_owned()),
+            "specificTemporarySprite" => Command::SpecificTemporarySprite(args[1].to_owned()),
+            "changeLocation" => Command::ChangeLocation(args[1].to_owned()),
+            "changeToTemporaryMap" => Command::ChangeToTemporaryMap(args[1].to_owned()),
+            "question" => Command::Question(args[1].to_owned(), args[2].to_owned()),
+            "fork" => Command::Fork(args[1].to_owned()),
+            "ambientLight" => Command::AmbientLight(args[1].parse().unwrap(),
+                                                    args[2].parse().unwrap(),
+                                                    args[3].parse().unwrap()),
+            "positionOffset" => Command::PositionOffset(args[1].to_owned(),
+                                                        args[2].parse().unwrap(),
+                                                        args[3].parse().unwrap()),
+            "end" => continue,
+            s => panic!("unknown command {}", s),
+        };
+        commands.push(command);
+    }
+
+    ScriptedEvent {
+        id: id,
+        music: music,
+        viewport: viewport,
+        characters: characters,
+        skippable: skippable,
+        commands: commands,
+        end: End::End, //XXXjdm
+        triggers: vec![],
+        forks: vec![],
+    }
+}
+
 fn main() {
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
@@ -345,15 +493,42 @@ fn main() {
 
     let mut args = env::args();
     let _self = args.next();
-    let map = args.next().unwrap_or("Town.xnb".into());
+    let map_name = args.next().unwrap_or("Town.xnb".into());
+    let event_id = args.next();
 
-    let base = Path::new("../xnb/uncompressed/Maps");
-    let f = File::open(base.join(map)).unwrap();
+    let base = Path::new("../xnb/uncompressed");
+    let f = File::open(base.join("Maps").join(&map_name)).unwrap();
     let xnb = XNB::from_buffer(f).unwrap();
     let map = match xnb.primary {
         Asset::Tide(map) => map,
         _ => panic!("unexpected xnb contents"),
     };
+
+    let event = event_id.and_then(|id| {
+        let f = File::open(base.join("Data/Events").join(&map_name)).ok();
+        let event = f.and_then(|f| {
+            let xnb = XNB::from_buffer(f).unwrap();
+            match xnb.primary {
+                Asset::Dictionary(ref d) => {
+                    for (k, v) in &d.map {
+                        if let DictionaryKey::String(ref s) = *k {
+                            if s.split('/').next() == Some(&id) {
+                                if let Asset::String(ref s) = *v {
+                                    return Some(s.clone());
+                                }
+                            }
+                        }
+                    }
+                    None
+                }
+                _ => panic!("unexpected event xnb contents"),
+            }
+        });
+        if let Some(ref event) = event {
+            println!("got event source:\n{}", event);
+        }
+        event.map(|e| parse_script(id, e))
+    });
 
     fn load_texture(base: &Path, filename: &str) -> Texture {
         let f = File::open(base.join(filename)).unwrap();
