@@ -54,10 +54,10 @@ fn image_for_tile(tile: &Tile, pos: (u32, u32), view: (u32, u32)) -> Image {
 
 #[derive(Copy, Clone, PartialEq)]
 enum PlayerDir {
-    Down,
-    Right,
-    Up,
-    Left,
+    Down = 0,
+    Right = 1,
+    Up = 2,
+    Left = 3,
 }
 
 fn image_for_texture(texture: &TextureTileInfo,
@@ -65,15 +65,11 @@ fn image_for_texture(texture: &TextureTileInfo,
                      view: (u32, u32),
                      offset: (i32, i32),
                      anim: Option<(u32, u32)>,
-                     dir: Option<PlayerDir>) -> Image {
+                     dir: PlayerDir) -> Image {
     let num_h_tiles = texture.0.get_width() / (texture.2).0;
     let offset = ((texture.3).0 + offset.0, (texture.3).1 + offset.1);
-    let base = dir.map_or(0, |d| match d {
-        PlayerDir::Down => 0,
-        PlayerDir::Right | PlayerDir::Left => 2,
-        PlayerDir::Up => 4,
-    });
-    let flip = dir.map_or(false, |d| d == PlayerDir::Left);
+    let base = texture.4[dir as usize].unwrap_or(0);
+    let flip = dir == PlayerDir::Left && texture.4[PlayerDir::Left as usize] == texture.4[PlayerDir::Right as usize];
     let anim_idx = anim.map_or(0, |a| a.0 / 150 % a.1);
     image_for_tile_reference(num_h_tiles,
                              texture.2.clone(),
@@ -111,7 +107,7 @@ fn image_for_tile_reference(num_h_tiles: u32,
                tile_h as f64])
 }
 
-type TextureTileInfo = (Texture, u32, (u32, u32), (i32, i32));
+type TextureTileInfo = (Texture, u32, (u32, u32), (i32, i32), [Option<u32>; 4]);
 
 struct Player {
     base: TextureTileInfo,
@@ -174,73 +170,95 @@ impl App {
 
         let ticks = self.ticks;
 
+        fn draw_layer(layer: &Layer,
+                      textures: &HashMap<String, Texture>,
+                      tilesheets: &[TileSheet],
+                      transform: [[f64; 3]; 2],
+                      gl: &mut GlGraphics,
+                      ticks: u32,
+                      (view_x, view_y): (u32, u32),
+                      (view_w, view_h): (u32, u32)) {
+            if !layer.visible  || layer.id == "Paths" {
+                return;
+            }
+            for base_tile in layer.tiles.iter() {
+                let tilesheet_name = base_tile.get_tilesheet();
+                let texture = textures.get(tilesheet_name).expect("no texture");
+                let tilesheet = tilesheets.iter().find(|s| s.id == tilesheet_name).expect("no tilesheet");
+                let tile = Tile {
+                    sheet: tilesheet,
+                    index: base_tile.get_index(ticks),
+                };
+                let (x, y) = base_tile.get_pos();
+                if x < view_x || x > view_w || y < view_y || y > view_h {
+                    continue;
+                }
+                let image = image_for_tile(&tile, (x, y), (view_x, view_y));
+                image.draw(texture, &Default::default(), transform, gl);
+            }
+        }
+
         self.gl.draw(args.viewport(), |c, gl| {
             // Clear the screen.
             clear(BLACK, gl);
 
-            for layer in layers.iter() {
-                if !layer.visible {
-                    continue;
+            let view = (view_x, view_y);
+            let transform = c.transform.zoom(SCALE);
+
+            for (i, layer) in layers.iter().enumerate() {
+                if i == layers.len() - 1 {
+                    break;
                 }
-                for base_tile in layer.tiles.iter() {
-                    let tilesheet_name = base_tile.get_tilesheet();
-                    let texture = textures.get(tilesheet_name).expect("no texture");
-                    let tilesheet = tilesheets.iter().find(|s| s.id == tilesheet_name).expect("no tilesheet");
-                    let tile = Tile {
-                        sheet: tilesheet,
-                        index: base_tile.get_index(ticks),
-                    };
-                    let (x, y) = base_tile.get_pos();
-                    if x < view_x || x > view_w || y < view_y || y > view_h {
-                        continue;
-                    }
-                    let image = image_for_tile(&tile, (x, y), (view_x, view_y));
-                    let transform = c.transform.zoom(SCALE);
-                    image.draw(texture, &Default::default(), transform, gl);
-                }
+                draw_layer(layer, textures, tilesheets, transform, gl, ticks,
+                           (view_x, view_y), (view_w, view_h));
             }
 
-            let view = (view_x, view_y);
             let pos = (player.x, player.y);
             let offset = (player.offset_x as i32, player.offset_y as i32);
 
             let transform = c.transform.clone().zoom(SCALE);
-            let maybe_flipped = transform.clone();
 
             let player_ticks = match player.last_move_start {
                 Some(start) => ticks - start,
                 None => 0,
             };
 
+            let three_frame = Some((player_ticks, 3));
+
             // Body
-            let image = image_for_texture(&player.base, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
-            image.draw(&player.base.0, &Default::default(), maybe_flipped, gl);
-            let image = image_for_texture(&player.bottom, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
-            image.draw(&player.bottom.0, &Default::default(), maybe_flipped, gl);
+            let image = image_for_texture(&player.base, pos, view, offset, three_frame, player.dir);
+            image.draw(&player.base.0, &Default::default(), transform, gl);
+            let image = image_for_texture(&player.bottom, pos, view, offset, three_frame, player.dir);
+            image.draw(&player.bottom.0, &Default::default(), transform, gl);
 
             // Hair
-            let image = image_for_texture(&player.hairstyle, pos, view, offset, None, Some(player.dir));
-            image.draw(&player.hairstyle.0, &Default::default(), maybe_flipped, gl);
+            let image = image_for_texture(&player.hairstyle, pos, view, offset, None, player.dir);
+            image.draw(&player.hairstyle.0, &Default::default(), transform, gl);
 
             // Hat
-            let image = image_for_texture(&player.hat, pos, view, offset, None, None);
+            let image = image_for_texture(&player.hat, pos, view, offset, None, player.dir);
             image.draw(&player.hat.0, &Default::default(), transform, gl);
 
             // Arms
-            let image = image_for_texture(&player.arms, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
-            image.draw(&player.arms.0, &Default::default(), maybe_flipped, gl);
+            let image = image_for_texture(&player.arms, pos, view, offset, three_frame, player.dir);
+            image.draw(&player.arms.0, &Default::default(), transform, gl);
 
             // Pants
-            let image = image_for_texture(&player.pants, pos, view, offset, Some((player_ticks, 3)), Some(player.dir));
-            image.draw(&player.pants.0, &Default::default(), maybe_flipped, gl);
+            let image = image_for_texture(&player.pants, pos, view, offset, three_frame, player.dir);
+            image.draw(&player.pants.0, &Default::default(), transform, gl);
 
             // Shirt
-            let image = image_for_texture(&player.shirt, pos, view, offset, None, None);
+            let image = image_for_texture(&player.shirt, pos, view, offset, None, player.dir);
             image.draw(&player.shirt.0, &Default::default(), transform, gl);
 
             // Facial accessory
-            let image = image_for_texture(&player.accessory, pos, view, offset, None, None);
-            image.draw(&player.accessory.0, &Default::default(), transform, gl);
+            if player.dir != PlayerDir::Up {
+                let image = image_for_texture(&player.accessory, pos, view, offset, None, player.dir);
+                image.draw(&player.accessory.0, &Default::default(), transform, gl);
+            }
+
+            draw_layer(layers.last().unwrap(), textures, tilesheets, transform, gl, ticks,
+                       (view_x, view_y), (view_w, view_h));
         });
     }
 
@@ -370,15 +388,16 @@ fn main() {
     let hat = load_texture(path, "hats.xnb");
     let shirt = load_texture(path, "shirts.xnb");
     let accessory = load_texture(path, "accessories.xnb");
+    let base_dir_info = [Some(0), Some(2), Some(4), Some(2)];
     let mut player = Player {
-        base: (base, 0, (16, 16), (0, 0)),
-        bottom: (bottom, 24, (16, 16), (0, 16)),
-        arms: (arms, 30, (16, 16), (0, 16)),
-        hairstyle: (hairstyle, 0, (16, 16), (0, 0)),
-        hat: (hat, 2, (20, 20), (-2, -2)),
-        pants: (pants, 42, (16, 16), (0, 16)),
-        shirt: (shirt, 0, (8, 8), (4, 15)),
-        accessory: (accessory, 0, (16, 16), (0, 3)),
+        base: (base, 0, (16, 16), (0, 0), base_dir_info),
+        bottom: (bottom, 24, (16, 16), (0, 16), base_dir_info),
+        arms: (arms, 30, (16, 16), (0, 16), base_dir_info),
+        hairstyle: (hairstyle, 0, (16, 16), (0, 0), base_dir_info),
+        hat: (hat, 2, (20, 20), (-2, -2), [Some(0), Some(1), Some(3), Some(2)]),
+        pants: (pants, 42, (16, 16), (0, 16), base_dir_info),
+        shirt: (shirt, 0, (8, 8), (4, 15), [Some(0), Some(1), Some(3), Some(2)]),
+        accessory: (accessory, 0, (16, 16), (0, 3), [Some(0), Some(1), None, Some(1)]),
         x: 10,
         y: 15,
         offset_x: 0.,
