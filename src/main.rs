@@ -21,6 +21,17 @@ use xnb::tide::{TileSheet, Layer};
 
 const SCALE: f64 = 1.5;
 
+struct Character {
+    name: String,
+    texture: TextureTileInfo,
+    index: u32,
+    x: u32,
+    y: u32,
+    offset_x: f64,
+    offset_y: f64,
+    dir: PlayerDir,
+}
+
 pub struct App {
     gl: GlGraphics,
     view_x: u32,
@@ -157,6 +168,7 @@ impl App {
               textures: &HashMap<String, Texture>,
               tilesheets: &[TileSheet],
               player: &Player,
+              characters: &[Character],
               layers: &[Layer]) {
         use graphics::*;
 
@@ -169,6 +181,20 @@ impl App {
         let view_h = args.viewport().window_size[1] / 16 + view_y;
 
         let ticks = self.ticks;
+
+        fn draw_character(character: &Character,
+                          transform: [[f64; 3]; 2],
+                          gl: &mut GlGraphics,
+                          (view_x, view_y): (u32, u32),
+                          (view_w, view_h): (u32, u32)) {
+            let image = image_for_texture(&character.texture,
+                                          (character.x, character.y),
+                                          (view_x, view_y),
+                                          (character.offset_x as i32, character.offset_y as i32),
+                                          None,
+                                          character.dir);
+            image.draw(&character.texture.0, &Default::default(), transform, gl);
+        }
 
         fn draw_layer(layer: &Layer,
                       textures: &HashMap<String, Texture>,
@@ -211,6 +237,11 @@ impl App {
                 }
                 draw_layer(layer, textures, tilesheets, transform, gl, ticks,
                            (view_x, view_y), (view_w, view_h));
+            }
+
+            for character in characters {
+                draw_character(character, transform, gl,
+                               (view_x, view_y), (view_w, view_h));
             }
 
             let pos = (player.x, player.y);
@@ -380,7 +411,7 @@ struct ScriptedEvent {
     id: String,
     music: String,
     viewport: (i32, i32),
-    characters: Vec<(String, (u32, u32), u8)>,
+    characters: Vec<ScriptedCharacter>,
     skippable: bool,
     commands: Vec<Command>,
     end: End,
@@ -400,10 +431,13 @@ fn parse_script(id: String, s: String) -> ScriptedEvent {
 
     let mut characters = vec![];
     while character_parts.peek().is_some() {
-        characters.push((character_parts.next().unwrap().to_owned(),
-                         (character_parts.next().unwrap().parse().unwrap(),
-                          character_parts.next().unwrap().parse().unwrap()),
-                         character_parts.next().unwrap().parse().unwrap()));
+        let character = ScriptedCharacter {
+            name: character_parts.next().unwrap().to_owned(),
+            pos: (character_parts.next().unwrap().parse().unwrap(),
+                  character_parts.next().unwrap().parse().unwrap()),
+            dir: character_parts.next().unwrap().parse().unwrap(),
+        };
+        characters.push(character);
     }
 
     let mut peekable = parts.peekable();
@@ -477,6 +511,50 @@ fn parse_script(id: String, s: String) -> ScriptedEvent {
     }
 }
 
+fn characters_for_event(event: &ScriptedEvent, path: &Path) -> Vec<Character> {
+    let mut characters = vec![];
+    for character in &event.characters {
+        if character.name == "farmer" {
+            continue;
+        }
+        let texture = load_texture(path, &format!("{}.xnb", character.name));
+        let info = (texture, 0, (16, 32), (0, 0), [Some(0), Some(1), Some(2), Some(3)]);
+        characters.push(Character {
+            texture: info,
+            name: character.name.clone(),
+            x: character.pos.0,
+            y: character.pos.1,
+            offset_x: 0.,
+            offset_y: 0.,
+            index: 0,
+            dir: match character.dir {
+                0 => PlayerDir::Up,
+                1 => PlayerDir::Right,
+                2 => PlayerDir::Down,
+                3 => PlayerDir::Left,
+                _ => unreachable!(),
+            },
+        });
+    }
+    characters
+}
+
+fn load_texture(base: &Path, filename: &str) -> Texture {
+    let f = File::open(base.join(filename)).unwrap();
+    let xnb = XNB::from_buffer(f).unwrap();
+    match xnb.primary {
+        Asset::Texture2d(mut texture) => {
+            let img = RgbaImage::from_raw(texture.width as u32,
+                                          texture.height as u32,
+                                          texture.mip_data.remove(0)).unwrap();
+            let mut settings = TextureSettings::new();
+            settings.set_filter(Filter::Nearest);
+            Texture::from_image(&img, &settings)
+        }
+        _ => panic!("unexpected xnb contents"),
+    }
+}
+
 fn main() {
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
@@ -533,22 +611,6 @@ fn main() {
         event.map(|e| parse_script(id, e))
     });
 
-    fn load_texture(base: &Path, filename: &str) -> Texture {
-        let f = File::open(base.join(filename)).unwrap();
-        let xnb = XNB::from_buffer(f).unwrap();
-        match xnb.primary {
-            Asset::Texture2d(mut texture) => {
-                let img = RgbaImage::from_raw(texture.width as u32,
-                                              texture.height as u32,
-                                              texture.mip_data.remove(0)).unwrap();
-                let mut settings = TextureSettings::new();
-                settings.set_filter(Filter::Nearest);
-                Texture::from_image(&img, &settings)
-            }
-            _ => panic!("unexpected xnb contents"),
-        }
-    }
-
     let mut tilesheets = HashMap::new();
     for ts in &map.tilesheets {
         let texture = load_texture(base, &format!("{}.xnb", ts.image_source));
@@ -557,15 +619,16 @@ fn main() {
     }
     println!("loaded {} tilesheets", tilesheets.len());
 
-    let path = Path::new("../xnb/uncompressed/Characters/Farmer");
-    let base = load_texture(path, "farmer_base.xnb");
-    let bottom = load_texture(path, "farmer_base.xnb");
-    let arms = load_texture(path, "farmer_base.xnb");
-    let pants = load_texture(path, "farmer_base.xnb");
-    let hairstyle = load_texture(path, "hairstyles.xnb");
-    let hat = load_texture(path, "hats.xnb");
-    let shirt = load_texture(path, "shirts.xnb");
-    let accessory = load_texture(path, "accessories.xnb");
+    let character_path = Path::new("../xnb/uncompressed/Characters");
+    let path = character_path.join("Farmer");
+    let base = load_texture(&path, "farmer_base.xnb");
+    let bottom = load_texture(&path, "farmer_base.xnb");
+    let arms = load_texture(&path, "farmer_base.xnb");
+    let pants = load_texture(&path, "farmer_base.xnb");
+    let hairstyle = load_texture(&path, "hairstyles.xnb");
+    let hat = load_texture(&path, "hats.xnb");
+    let shirt = load_texture(&path, "shirts.xnb");
+    let accessory = load_texture(&path, "accessories.xnb");
     let base_dir_info = [Some(0), Some(2), Some(4), Some(2)];
     let mut player = Player {
         base: (base, 0, (16, 16), (0, 0), base_dir_info),
@@ -597,6 +660,18 @@ fn main() {
         update_last_move: false,
     };
 
+    let characters = match event {
+        Some(ref ev) => characters_for_event(ev, &character_path),
+        None => vec![],
+    };
+
+    //if let Some(ref event) = event {
+        /*if event.viewport.0 > 0 && event.viewport.1 > 0 {
+            app.view_x 
+        }
+        app.view_x = */
+    //}
+
     let mut events = window.events();
     while let Some(e) = events.next(&mut window) {
         if let Some(Button::Keyboard(k)) = e.press_args() {
@@ -614,7 +689,12 @@ fn main() {
         }
 
         if let Some(r) = e.render_args() {
-            app.render(&r, &tilesheets, &map.tilesheets, &player, &map.layers);
+            app.render(&r,
+                       &tilesheets,
+                       &map.tilesheets,
+                       &player,
+                       &characters,
+                       &map.layers);
         }
 
         if let Some(u) = e.update_args() {
