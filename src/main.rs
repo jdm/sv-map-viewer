@@ -496,6 +496,9 @@ fn main() {
     let map_name = args.next().unwrap_or("Town.xnb".into());
     let event_id = args.next();
 
+    let view_x = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let view_y = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+
     let base = Path::new("../xnb/uncompressed");
     let f = File::open(base.join("Maps").join(&map_name)).unwrap();
     let xnb = XNB::from_buffer(f).unwrap();
@@ -584,8 +587,8 @@ fn main() {
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(opengl),
-        view_x: 0,
-        view_y: 0,
+        view_x: view_x,
+        view_y: view_y,
         ticks: 0,
         a_pressed: false,
         d_pressed: false,
