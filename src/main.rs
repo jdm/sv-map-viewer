@@ -101,8 +101,8 @@ fn image_for_tile_reference(num_h_tiles: u32,
     };
     Image::new()
         .src_rect(src_rect)
-        .rect([((x - view_x) * 16) as f64 + off_x as f64,
-               ((y - view_y) * 16) as f64 + off_y as f64,
+        .rect([((x as i32 - view_x as i32) * 16) as f64 + off_x as f64,
+               ((y as i32 - view_y as i32) * 16) as f64 + off_y as f64,
                tile_w as f64,
                tile_h as f64])
 }
