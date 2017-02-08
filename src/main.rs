@@ -3,6 +3,7 @@ extern crate glutin_window;
 extern crate image;
 extern crate opengl_graphics;
 extern crate piston;
+extern crate squish;
 extern crate xnb;
 
 use glutin_window::GlutinWindow as Window;
@@ -16,7 +17,8 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::path::Path;
-use xnb::{XNB, Asset, DictionaryKey};
+use squish::{decompress_image, CompressType};
+use xnb::{XNB, Asset, DictionaryKey, SurfaceFormat};
 use xnb::tide::{TileSheet, Layer};
 
 const SCALE: f64 = 1.5;
@@ -544,9 +546,19 @@ fn load_texture(base: &Path, filename: &str) -> Texture {
     let xnb = XNB::from_buffer(f).unwrap();
     match xnb.primary {
         Asset::Texture2d(mut texture) => {
+            let data = texture.mip_data.remove(0);
+            let data = match texture.format {
+                SurfaceFormat::Dxt3 => {
+                    decompress_image(texture.width as i32,
+                                     texture.height as i32,
+                                     data.as_ptr() as *const _,
+                                     CompressType::Dxt3)
+                }
+                _ => data,
+            };
             let img = RgbaImage::from_raw(texture.width as u32,
                                           texture.height as u32,
-                                          texture.mip_data.remove(0)).unwrap();
+                                          data).unwrap();
             let mut settings = TextureSettings::new();
             settings.set_filter(Filter::Nearest);
             Texture::from_image(&img, &settings)
