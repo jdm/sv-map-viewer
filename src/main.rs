@@ -499,6 +499,7 @@ fn parse_script(id: String, s: String) -> ScriptedEvent {
                                                         args[2].parse().unwrap(),
                                                         args[3].parse().unwrap()),
             "end" => continue,
+            "" => continue,
             s => panic!("unknown command {}", s),
         };
         commands.push(command);
