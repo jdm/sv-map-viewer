@@ -27,8 +27,8 @@ struct Character {
     name: String,
     texture: TextureTileInfo,
     index: u32,
-    x: u32,
-    y: u32,
+    x: i32,
+    y: i32,
     offset_x: f64,
     offset_y: f64,
     dir: PlayerDir,
@@ -36,8 +36,8 @@ struct Character {
 
 pub struct App {
     gl: GlGraphics,
-    view_x: u32,
-    view_y: u32,
+    view_x: i32,
+    view_y: i32,
     ticks: u32,
     d_pressed: bool,
     a_pressed: bool,
@@ -51,7 +51,7 @@ struct Tile<'a> {
     index: u32,
 }
 
-fn image_for_tile(tile: &Tile, pos: (u32, u32), view: (u32, u32)) -> Image {
+fn image_for_tile(tile: &Tile, pos: (i32, i32), view: (i32, i32)) -> Image {
     let num_h_tiles = tile.sheet.sheet_size.0;
     let tile_w = tile.sheet.tile_size.0;
     let tile_h = tile.sheet.tile_size.1;
@@ -74,8 +74,8 @@ enum PlayerDir {
 }
 
 fn image_for_texture(texture: &TextureTileInfo,
-                     pos: (u32, u32),
-                     view: (u32, u32),
+                     pos: (i32, i32),
+                     view: (i32, i32),
                      offset: (i32, i32),
                      anim: Option<(u32, u32)>,
                      dir: PlayerDir) -> Image {
@@ -98,9 +98,9 @@ fn image_for_tile_reference(num_h_tiles: u32,
                             (tile_w, tile_h): (u32, u32),
                             index: u32,
                             index_y_offset: u32,
-                            (x, y): (u32, u32),
+                            (x, y): (i32, i32),
                             (off_x, off_y): (i32, i32),
-                            (view_x, view_y): (u32, u32),
+                            (view_x, view_y): (i32, i32),
                             flip_h: bool) -> Image {
     let src_x = index % num_h_tiles * tile_w;
     let src_y = (index / num_h_tiles + index_y_offset) * tile_h;
@@ -114,8 +114,8 @@ fn image_for_tile_reference(num_h_tiles: u32,
     };
     Image::new()
         .src_rect(src_rect)
-        .rect([((x as i32 - view_x as i32) * 16) as f64 + off_x as f64,
-               ((y as i32 - view_y as i32) * 16) as f64 + off_y as f64,
+        .rect([((x as i32 - view_x) * 16) as f64 + off_x as f64,
+               ((y as i32 - view_y) * 16) as f64 + off_y as f64,
                tile_w as f64,
                tile_h as f64])
 }
@@ -131,8 +131,8 @@ struct Player {
     hat: TextureTileInfo,
     shirt: TextureTileInfo,
     accessory: TextureTileInfo,
-    x: u32,
-    y: u32,
+    x: i32,
+    y: i32,
     offset_x: f64,
     offset_y: f64,
     last_move_start: Option<u32>,
@@ -179,16 +179,19 @@ impl App {
         let view_x = self.view_x;
         let view_y = self.view_y;
 
-        let view_w = args.viewport().window_size[0] / 16 + view_x;
-        let view_h = args.viewport().window_size[1] / 16 + view_y;
+        let view_w = args.viewport().window_size[0] as i32 / 16 + view_x;
+        let view_h = args.viewport().window_size[1] as i32 / 16 + view_y;
 
         let ticks = self.ticks;
 
         fn draw_character(character: &Character,
                           transform: [[f64; 3]; 2],
                           gl: &mut GlGraphics,
-                          (view_x, view_y): (u32, u32),
-                          (view_w, view_h): (u32, u32)) {
+                          (view_x, view_y): (i32, i32),
+                          (_view_w, _view_h): (i32, i32)) {
+            if character.x < 0 || character.y < 0 {
+                return;
+            }
             let image = image_for_texture(&character.texture,
                                           (character.x, character.y),
                                           (view_x, view_y),
@@ -204,8 +207,8 @@ impl App {
                       transform: [[f64; 3]; 2],
                       gl: &mut GlGraphics,
                       ticks: u32,
-                      (view_x, view_y): (u32, u32),
-                      (view_w, view_h): (u32, u32)) {
+                      (view_x, view_y): (i32, i32),
+                      (view_w, view_h): (i32, i32)) {
             if !layer.visible  || layer.id == "Paths" {
                 return;
             }
@@ -218,6 +221,7 @@ impl App {
                     index: base_tile.get_index(ticks),
                 };
                 let (x, y) = base_tile.get_pos();
+                let (x, y) = (x as i32, y as i32);
                 if x < view_x || x > view_w || y < view_y || y > view_h {
                     continue;
                 }
@@ -246,7 +250,7 @@ impl App {
                                (view_x, view_y), (view_w, view_h));
             }
 
-            let pos = (player.x, player.y);
+            let pos = (player.x as i32, player.y as i32);
             let offset = (player.offset_x as i32, player.offset_y as i32);
 
             let transform = c.transform.clone().zoom(SCALE);
@@ -364,7 +368,7 @@ impl App {
 
 struct ScriptedCharacter {
     name: String,
-    pos: (u32, u32),
+    pos: (i32, i32),
     dir: u8,
 }
 
@@ -677,12 +681,10 @@ fn main() {
         None => vec![],
     };
 
-    //if let Some(ref event) = event {
-        /*if event.viewport.0 > 0 && event.viewport.1 > 0 {
-            app.view_x 
-        }
-        app.view_x = */
-    //}
+    if let Some(ref event) = event {
+        app.view_x = event.viewport.0;
+        app.view_y = event.viewport.1;
+    }
 
     let mut events = window.events();
     while let Some(e) = events.next(&mut window) {
