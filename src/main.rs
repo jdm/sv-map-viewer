@@ -17,7 +17,7 @@ use std::fs::File;
 use std::path::Path;
 use squish::{decompress_image, CompressType};
 use xnb::{XNB, Asset, DictionaryKey, SurfaceFormat};
-use xnb::tide::{TileSheet, Layer};
+use xnb::tide::{TileSheet, Layer, Map};
 
 const SCALE: f64 = 1.5;
 
@@ -143,6 +143,26 @@ struct Player {
 }
 
 impl Player {
+    fn adjusted_pos(&self, delta_x: f64, delta_y: f64) -> (i32, i32) {
+        let x = self.x + (if delta_x < 0. && self.offset_x + delta_x < -8. {
+            -1
+        } else if delta_x > 0. && self.offset_x + delta_x > 8. {
+           1
+        } else {
+            0
+        });
+
+        let y = self.y + (if delta_y < 0. && self.offset_y + delta_y < -8. {
+            -1
+        } else if delta_y > 0. && self.offset_y + delta_y > 8. {
+           1
+        } else {
+            0
+        });
+
+        (x, y)
+    }
+
     fn move_horiz(&mut self, delta: f64) {
         self.offset_x += delta;
         if delta < 0. && self.offset_x < -8. {
@@ -181,8 +201,8 @@ impl App {
         let view_x = self.view_x;
         let view_y = self.view_y;
 
-        let view_w = args.viewport().window_size[0] as i32 / 16 + view_x;
-        let view_h = args.viewport().window_size[1] as i32 / 16 + view_y;
+        let view_w = args.viewport().window_size[0] as i32 / 16 + view_x / 16;
+        let view_h = args.viewport().window_size[1] as i32 / 16 + view_y / 16;
 
         let ticks = self.ticks;
 
@@ -328,7 +348,7 @@ impl App {
         }
     }
 
-    fn update(&mut self, args: &UpdateArgs, player: &mut Player) {
+    fn update(&mut self, args: &UpdateArgs, player: &mut Player, map: &Map) {
         self.ticks += (args.dt * 1000.) as u32;
 
         if self.update_last_move {
@@ -353,16 +373,34 @@ impl App {
         }
 
         const MOVE_AMOUNT: f64 = 100.0;
-        if self.a_pressed {
-            player.move_horiz(-MOVE_AMOUNT * args.dt);
+        let delta_x = if self.a_pressed {
+            -MOVE_AMOUNT * args.dt
         } else if self.d_pressed {
-            player.move_horiz(MOVE_AMOUNT * args.dt);
-        }
-        if self.w_pressed {
-            player.move_vert(-MOVE_AMOUNT * args.dt)
+            MOVE_AMOUNT * args.dt
+        } else {
+            0.
+        };
+
+        let delta_y = if self.w_pressed {
+            -MOVE_AMOUNT * args.dt
         } else if self.s_pressed {
-            player.move_vert(MOVE_AMOUNT * args.dt)
+            MOVE_AMOUNT * args.dt
+        } else {
+            0.
+        };
+
+        let (adjusted_x, adjusted_y) = player.adjusted_pos(delta_x, delta_y);
+        let layer = map.layers.iter().find(|l| l.id == "Buildings").expect("no buildings?");
+        for tile in &layer.tiles {
+            let (tx, ty) = tile.get_pos();
+            if (tx as i32, ty as i32) == (adjusted_x, adjusted_y) {
+                return;
+            }
         }
+
+        player.move_horiz(delta_x);
+        player.move_vert(delta_y);
+
     }
 }
 
@@ -722,7 +760,7 @@ fn main() {
         }
 
         if let Some(u) = e.update_args() {
-            app.update(&u, &mut player);
+            app.update(&u, &mut player, &map);
         }
     }
 }
