@@ -1,17 +1,15 @@
 extern crate graphics;
-extern crate glutin_window;
+extern crate piston_window;
 extern crate image;
 extern crate opengl_graphics;
 extern crate piston;
 extern crate squish;
 extern crate xnb;
 
-use glutin_window::GlutinWindow as Window;
 use graphics::Image;
 use image::RgbaImage;
 use opengl_graphics::{GlGraphics, OpenGL, Texture, TextureSettings, Filter, ImageSize};
-use piston::window::WindowSettings;
-use piston::event_loop::*;
+use piston_window::{PistonWindow, WindowSettings, OpenGL as PistonOpenGL};
 use piston::input::*;
 use std::collections::HashMap;
 use std::env;
@@ -24,9 +22,9 @@ use xnb::tide::{TileSheet, Layer};
 const SCALE: f64 = 1.5;
 
 struct Character {
-    name: String,
+    _name: String,
     texture: TextureTileInfo,
-    index: u32,
+    _index: u32,
     x: i32,
     y: i32,
     offset_x: f64,
@@ -113,7 +111,7 @@ fn image_for_tile_reference(num_h_tiles: u32,
         [src_x as i32, src_y as i32, tile_w as i32, tile_h as i32]
     };
     Image::new()
-        .src_rect(src_rect)
+        .src_rect([src_rect[0] as f64, src_rect[1] as f64, src_rect[2] as f64, src_rect[3] as f64])
         .rect([((x as i32 - view_x) * 16) as f64 + off_x as f64,
                ((y as i32 - view_y) * 16) as f64 + off_y as f64,
                tile_w as f64,
@@ -406,6 +404,7 @@ enum Command {
 enum Trigger {
 }
 
+#[allow(dead_code)]
 enum End {
     WarpOut,
     Dialogue(String, String),
@@ -414,15 +413,15 @@ enum End {
 }
 
 struct ScriptedEvent {
-    id: String,
-    music: String,
+    _id: String,
+    _music: String,
     viewport: (i32, i32),
     characters: Vec<ScriptedCharacter>,
-    skippable: bool,
-    commands: Vec<Command>,
-    end: End,
-    triggers: Vec<Trigger>,
-    forks: Vec<ScriptedEvent>,
+    _skippable: bool,
+    _commands: Vec<Command>,
+    _end: End,
+    _triggers: Vec<Trigger>,
+    _forks: Vec<ScriptedEvent>,
 }
 
 fn parse_script(id: String, s: String) -> ScriptedEvent {
@@ -506,15 +505,15 @@ fn parse_script(id: String, s: String) -> ScriptedEvent {
     }
 
     ScriptedEvent {
-        id: id,
-        music: music,
+        _id: id,
+        _music: music,
         viewport: viewport,
         characters: characters,
-        skippable: skippable,
-        commands: commands,
-        end: End::End, //XXXjdm
-        triggers: vec![],
-        forks: vec![],
+        _skippable: skippable,
+        _commands: commands,
+        _end: End::End, //XXXjdm
+        _triggers: vec![],
+        _forks: vec![],
     }
 }
 
@@ -528,12 +527,12 @@ fn characters_for_event(event: &ScriptedEvent, path: &Path) -> Vec<Character> {
         let info = (texture, 0, (16, 32), (0, 0), [Some(0), Some(1), Some(2), Some(3)]);
         characters.push(Character {
             texture: info,
-            name: character.name.clone(),
+            _name: character.name.clone(),
             x: character.pos.0,
             y: character.pos.1,
             offset_x: 0.,
             offset_y: 0.,
-            index: 0,
+            _index: 0,
             dir: match character.dir {
                 0 => PlayerDir::Up,
                 1 => PlayerDir::Right,
@@ -573,15 +572,12 @@ fn load_texture(base: &Path, filename: &str) -> Texture {
 }
 
 fn main() {
-    // Change this to OpenGL::V2_1 if not working.
-    let opengl = OpenGL::V3_2;
-
     // Create an Glutin window.
-    let mut window: Window = WindowSettings::new(
+    let mut window: PistonWindow = WindowSettings::new(
             "spinning-square",
             [800, 600]
         )
-        .opengl(opengl)
+        .opengl(PistonOpenGL::V3_2)
         .exit_on_esc(true)
         .build()
         .unwrap();
@@ -666,7 +662,7 @@ fn main() {
 
     // Create a new game and run it.
     let mut app = App {
-        gl: GlGraphics::new(opengl),
+        gl: GlGraphics::new(OpenGL::V3_2),
         view_x: view_x,
         view_y: view_y,
         ticks: 0,
@@ -687,8 +683,7 @@ fn main() {
         app.view_y = event.viewport.1;
     }
 
-    let mut events = window.events();
-    while let Some(e) = events.next(&mut window) {
+    while let Some(e) = window.next() {
         if let Some(Button::Keyboard(k)) = e.press_args() {
             match k {
                 Key::Left if app.view_x > 0 => app.view_x -= 1,
