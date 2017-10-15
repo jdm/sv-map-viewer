@@ -112,8 +112,8 @@ fn image_for_tile_reference(num_h_tiles: u32,
     };
     Image::new()
         .src_rect([src_rect[0] as f64, src_rect[1] as f64, src_rect[2] as f64, src_rect[3] as f64])
-        .rect([((x as i32 - view_x) * 16) as f64 + off_x as f64,
-               ((y as i32 - view_y) * 16) as f64 + off_y as f64,
+        .rect([(x as i32 * 16) as f64 + off_x as f64 - view_x as f64,
+               (y as i32 * 16) as f64 + off_y as f64 - view_y as f64,
                tile_w as f64,
                tile_h as f64])
 }
@@ -220,7 +220,7 @@ impl App {
                 };
                 let (x, y) = base_tile.get_pos();
                 let (x, y) = (x as i32, y as i32);
-                if x < view_x || x > view_w || y < view_y || y > view_h {
+                if x < view_x / 16 || x > view_w || y < view_y / 16 || y > view_h {
                     continue;
                 }
                 let image = image_for_tile(&tile, (x, y), (view_x, view_y));
@@ -579,6 +579,7 @@ fn main() {
         )
         .opengl(PistonOpenGL::V3_2)
         .exit_on_esc(true)
+        .vsync(true)
         .build()
         .unwrap();
 
@@ -587,8 +588,8 @@ fn main() {
     let map_name = args.next().unwrap_or("Town.xnb".into());
     let event_id = args.next();
 
-    let view_x = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let view_y = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let mut view_x = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let mut view_y = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     let base = Path::new("../xnb/uncompressed");
     let f = File::open(base.join("Maps").join(&map_name)).unwrap();
@@ -660,11 +661,21 @@ fn main() {
         dir: PlayerDir::Down,
     };
 
+    let characters = match event {
+        Some(ref ev) => characters_for_event(ev, &character_path),
+        None => vec![],
+    };
+
+    if let Some(ref event) = event {
+        view_x = event.viewport.0;
+        view_y = event.viewport.1;
+    }
+
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(OpenGL::V3_2),
-        view_x: view_x,
-        view_y: view_y,
+        view_x: view_x * map.tilesheets[0].tile_size.0 as i32,
+        view_y: view_y * map.tilesheets[0].tile_size.1 as i32,
         ticks: 0,
         a_pressed: false,
         d_pressed: false,
@@ -672,16 +683,6 @@ fn main() {
         s_pressed: false,
         update_last_move: false,
     };
-
-    let characters = match event {
-        Some(ref ev) => characters_for_event(ev, &character_path),
-        None => vec![],
-    };
-
-    if let Some(ref event) = event {
-        app.view_x = event.viewport.0;
-        app.view_y = event.viewport.1;
-    }
 
     while let Some(e) = window.next() {
         if let Some(Button::Keyboard(k)) = e.press_args() {
