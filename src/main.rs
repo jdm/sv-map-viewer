@@ -21,6 +21,11 @@ use xnb::tide::{TileSheet, Layer};
 
 const SCALE: f64 = 1.5;
 
+struct ResolvedTile<'a> {
+    texture: &'a Texture,
+    tilesheet: &'a TileSheet,
+}
+
 struct Character {
     _name: String,
     texture: TextureTileInfo,
@@ -165,11 +170,10 @@ impl Player {
 impl App {
     fn render(&mut self,
               args: &RenderArgs,
-              textures: &HashMap<String, Texture>,
-              tilesheets: &[TileSheet],
               player: &Player,
               characters: &[Character],
-              layers: &[Layer]) {
+              layers: &[Layer],
+              resolved_layers: &[Vec<ResolvedTile>]) {
         use graphics::*;
 
         const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -200,8 +204,7 @@ impl App {
         }
 
         fn draw_layer(layer: &Layer,
-                      textures: &HashMap<String, Texture>,
-                      tilesheets: &[TileSheet],
+                      resolved_tiles: &[ResolvedTile],
                       transform: [[f64; 3]; 2],
                       gl: &mut GlGraphics,
                       ticks: u32,
@@ -210,12 +213,9 @@ impl App {
             if !layer.visible  || layer.id == "Paths" {
                 return;
             }
-            for base_tile in layer.tiles.iter() {
-                let tilesheet_name = base_tile.get_tilesheet();
-                let texture = textures.get(tilesheet_name).expect("no texture");
-                let tilesheet = tilesheets.iter().find(|s| s.id == tilesheet_name).expect("no tilesheet");
+            for (base_tile, resolved) in layer.tiles.iter().zip(resolved_tiles) {
                 let tile = Tile {
-                    sheet: tilesheet,
+                    sheet: resolved.tilesheet,
                     index: base_tile.get_index(ticks),
                 };
                 let (x, y) = base_tile.get_pos();
@@ -224,7 +224,7 @@ impl App {
                     continue;
                 }
                 let image = image_for_tile(&tile, (x, y), (view_x, view_y));
-                image.draw(texture, &Default::default(), transform, gl);
+                image.draw(resolved.texture, &Default::default(), transform, gl);
             }
         }
 
@@ -235,11 +235,11 @@ impl App {
             let view = (view_x, view_y);
             let transform = c.transform.zoom(SCALE);
 
-            for (i, layer) in layers.iter().enumerate() {
+            for (i, (layer, resolved)) in layers.iter().zip(resolved_layers).enumerate() {
                 if i == layers.len() - 1 {
                     break;
                 }
-                draw_layer(layer, textures, tilesheets, transform, gl, ticks,
+                draw_layer(layer, resolved, transform, gl, ticks,
                            (view_x, view_y), (view_w, view_h));
             }
 
@@ -292,7 +292,9 @@ impl App {
                 image.draw(&player.accessory.0, &Default::default(), transform, gl);
             }
 
-            draw_layer(layers.last().unwrap(), textures, tilesheets, transform, gl, ticks,
+            draw_layer(layers.last().unwrap(),
+                       resolved_layers.last().unwrap(),
+                       transform, gl, ticks,
                        (view_x, view_y), (view_w, view_h));
         });
     }
@@ -633,6 +635,18 @@ fn main() {
     }
     println!("loaded {} tilesheets", tilesheets.len());
 
+    let mut resolved_layers = vec![];
+    for layer in &map.layers {
+        let layer_tiles = layer.tiles.iter().map(|t| {
+            let name = t.get_tilesheet();
+            ResolvedTile {
+                texture: tilesheets.get(name).expect("missing texture"),
+                tilesheet: map.tilesheets.iter().find(|s| s.id == name).expect("missing tilesheet"),
+            }
+        }).collect();
+        resolved_layers.push(layer_tiles);
+    }
+
     let character_path = Path::new("../xnb/uncompressed/Characters");
     let path = character_path.join("Farmer");
     let base = load_texture(&path, "farmer_base.xnb");
@@ -701,11 +715,10 @@ fn main() {
 
         if let Some(r) = e.render_args() {
             app.render(&r,
-                       &tilesheets,
-                       &map.tilesheets,
                        &player,
                        &characters,
-                       &map.layers);
+                       &map.layers,
+                       &resolved_layers);
         }
 
         if let Some(u) = e.update_args() {
