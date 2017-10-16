@@ -41,6 +41,8 @@ pub struct App {
     gl: GlGraphics,
     view_x: i32,
     view_y: i32,
+    view_w: u32,
+    view_h: u32,
     ticks: u32,
     d_pressed: bool,
     a_pressed: bool,
@@ -201,6 +203,8 @@ impl App {
         let view_x = self.view_x;
         let view_y = self.view_y;
 
+        self.view_w = args.viewport().window_size[0];
+        self.view_h = args.viewport().window_size[1];
         let view_w = args.viewport().window_size[0] as i32 / 16 + view_x / 16;
         let view_h = args.viewport().window_size[1] as i32 / 16 + view_y / 16;
 
@@ -401,6 +405,31 @@ impl App {
         player.move_horiz(delta_x);
         player.move_vert(delta_y);
 
+        let player_x = player.x * 16 + player.offset_x as i32;
+        let player_y = player.y * 16 + player.offset_y as i32;
+
+        let (view_w, view_h) = ((self.view_w as f64 / SCALE) as i32, (self.view_h as f64 / SCALE)  as i32);
+
+        let adjusted_x = if player_x - self.view_x < view_w / 3 {
+            player_x - view_w / 3
+        } else if player_x - self.view_x > view_w / 3 * 2 {
+            player_x - view_w / 3 * 2
+        } else {
+            self.view_x
+        };
+
+        let adjusted_y = if player_y - self.view_y < view_h / 3 {
+            player_y - view_h / 3
+        } else if player_y - self.view_y > view_h / 3 * 2 {
+            player_y - view_h / 3 * 2
+        } else {
+            self.view_y
+        };
+
+        let max_x = (map.layers[0].size.0 as i32 - view_w / 16) * 16;
+        let max_y = (map.layers[0].size.1 as i32 - view_h / 16) * 16;
+        self.view_x = adjusted_x.max(0).min(max_x);
+        self.view_y = adjusted_y.max(0).min(max_y);
     }
 }
 
@@ -613,9 +642,10 @@ fn load_texture(base: &Path, filename: &str) -> Texture {
 
 fn main() {
     // Create an Glutin window.
+    const WINDOW_DIMENSIONS: (u32, u32) = (800, 600);
     let mut window: PistonWindow = WindowSettings::new(
             "spinning-square",
-            [800, 600]
+            [WINDOW_DIMENSIONS.0, WINDOW_DIMENSIONS.1]
         )
         .opengl(PistonOpenGL::V3_2)
         .exit_on_esc(true)
@@ -728,6 +758,8 @@ fn main() {
         gl: GlGraphics::new(OpenGL::V3_2),
         view_x: view_x * map.tilesheets[0].tile_size.0 as i32,
         view_y: view_y * map.tilesheets[0].tile_size.1 as i32,
+        view_w: WINDOW_DIMENSIONS.0,
+        view_h: WINDOW_DIMENSIONS.1,
         ticks: 0,
         a_pressed: false,
         d_pressed: false,
