@@ -133,7 +133,7 @@ struct Player {
     arms: TextureTileInfo,
     pants: TextureTileInfo,
     hairstyle: TextureTileInfo,
-    hat: TextureTileInfo,
+    hat: Option<TextureTileInfo>,
     shirt: TextureTileInfo,
     accessory: TextureTileInfo,
     x: i32,
@@ -295,8 +295,10 @@ impl App {
             image.draw(&player.hairstyle.0, &Default::default(), transform, gl);
 
             // Hat
-            let image = image_for_texture(&player.hat, pos, view, offset, None, player.dir);
-            image.draw(&player.hat.0, &Default::default(), transform, gl);
+            if let Some(ref hat) = player.hat {
+                let image = image_for_texture(hat, pos, view, offset, None, player.dir);
+                image.draw(&hat.0, &Default::default(), transform, gl);
+            }
 
             // Arms
             let image = image_for_texture(&player.arms, pos, view, offset, three_frame, player.dir);
@@ -722,7 +724,7 @@ fn main() {
     let arms = load_texture(&path, "farmer_base.xnb");
     let pants = load_texture(&path, "farmer_base.xnb");
     let hairstyle = load_texture(&path, "hairstyles.xnb");
-    let hat = load_texture(&path, "hats.xnb");
+    //let hat = load_texture(&path, "hats.xnb");
     let shirt = load_texture(&path, "shirts.xnb");
     let accessory = load_texture(&path, "accessories.xnb");
     let base_dir_info = [Some(0), Some(2), Some(4), Some(2)];
@@ -731,7 +733,8 @@ fn main() {
         bottom: (bottom, 24, (16, 16), (0, 16), base_dir_info),
         arms: (arms, 30, (16, 16), (0, 16), base_dir_info),
         hairstyle: (hairstyle, 0, (16, 16), (0, 0), base_dir_info),
-        hat: (hat, 2, (20, 20), (-2, -2), [Some(0), Some(1), Some(3), Some(2)]),
+        //hat: (hat, 2, (20, 20), (-2, -2), [Some(0), Some(1), Some(3), Some(2)]),
+        hat: None,
         pants: (pants, 42, (16, 16), (0, 16), base_dir_info),
         shirt: (shirt, 0, (8, 8), (4, 15), [Some(0), Some(1), Some(3), Some(2)]),
         accessory: (accessory, 0, (16, 16), (0, 3), [Some(0), Some(1), None, Some(1)]),
