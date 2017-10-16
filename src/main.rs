@@ -165,25 +165,41 @@ impl Player {
         (x, y)
     }
 
-    fn move_horiz(&mut self, delta: f64) {
+    fn move_horiz(&mut self, delta: f64, clamp_to_current_pos: bool) {
         self.offset_x += delta;
         if delta < 0. && self.offset_x < -8. {
-            self.offset_x = 8.;
-            self.x -= 1;
+            if clamp_to_current_pos {
+                self.offset_x = -7.99;
+            } else {
+                self.offset_x = 8.;
+                self.x -= 1;
+            }
         } else if delta > 0. && self.offset_x > 8. {
-            self.offset_x = -8.;
-            self.x += 1;
+            if clamp_to_current_pos {
+                self.offset_x = 7.99;
+            } else {
+                self.offset_x = -8.;
+                self.x += 1;
+            }
         }
     }
 
-    fn move_vert(&mut self, delta: f64) {
+    fn move_vert(&mut self, delta: f64, clamp_to_current_pos: bool) {
         self.offset_y += delta;
         if delta < 0. && self.offset_y < -8. {
-            self.offset_y = 8.;
-            self.y -= 1;
+            if clamp_to_current_pos {
+                self.offset_y = -7.99;
+            } else {
+                self.offset_y = 8.;
+                self.y -= 1;
+            }
         } else if delta > 0. && self.offset_y > 8. {
-            self.offset_y = -8.;
-            self.y += 1;
+            if clamp_to_current_pos {
+                self.offset_y = 7.99;
+            } else {
+                self.offset_y = -8.;
+                self.y += 1;
+            }
         }
     }
 }
@@ -397,15 +413,17 @@ impl App {
 
         let (adjusted_x, adjusted_y) = player.adjusted_pos(delta_x, delta_y);
         let layer = map.layers.iter().find(|l| l.id == "Buildings").expect("no buildings?");
+        let mut clamp_to_current_pos = false;
         for tile in &layer.tiles {
             let (tx, ty) = tile.get_pos();
-            if (tx as i32, ty as i32) == (adjusted_x, adjusted_y) {
-                return;
+            if (tx as i32, ty as i32) == (adjusted_x, adjusted_y + 1) {
+                clamp_to_current_pos = true;
+                break;
             }
         }
 
-        player.move_horiz(delta_x);
-        player.move_vert(delta_y);
+        player.move_horiz(delta_x, clamp_to_current_pos);
+        player.move_vert(delta_y, clamp_to_current_pos);
 
         let player_x = player.x * 16 + player.offset_x as i32;
         let player_y = player.y * 16 + player.offset_y as i32;
