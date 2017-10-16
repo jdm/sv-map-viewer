@@ -249,10 +249,12 @@ impl App {
                       gl: &mut GlGraphics,
                       ticks: u32,
                       (view_x, view_y): (i32, i32),
-                      (view_w, view_h): (i32, i32)) {
+                      (view_w, view_h): (i32, i32),
+                      player: Option<&Player>) {
             if !layer.visible  || layer.id == "Paths" {
                 return;
             }
+            let mut last_pos = None;
             for (base_tile, resolved) in layer.tiles.iter().zip(resolved_tiles) {
                 let tile = Tile {
                     sheet: resolved.tilesheet,
@@ -260,6 +262,17 @@ impl App {
                 };
                 let (x, y) = base_tile.get_pos();
                 let (x, y) = (x as i32, y as i32);
+
+                if let Some(player) = player {
+                    if y == player.y + 1 &&
+                        x >= player.x &&
+                        last_pos.map_or(false, |(tx, _)| tx < player.x)
+                    {
+                        draw_player(player, gl, transform.clone(), (view_x, view_y), ticks);
+                    }
+                }
+                last_pos = Some((x, y));
+
                 if x < view_x / 16 || x > view_w || y < view_y / 16 || y > view_h {
                     continue;
                 }
@@ -268,30 +281,15 @@ impl App {
             }
         }
 
-        self.gl.draw(args.viewport(), |c, gl| {
-            // Clear the screen.
-            clear(BLACK, gl);
-
-            let view = (view_x, view_y);
-            let transform = c.transform.zoom(SCALE);
-
-            for (i, (layer, resolved)) in layers.iter().zip(resolved_layers).enumerate() {
-                if i == layers.len() - 1 {
-                    break;
-                }
-                draw_layer(layer, resolved, transform, gl, ticks,
-                           (view_x, view_y), (view_w, view_h));
-            }
-
-            for character in characters {
-                draw_character(character, transform, gl,
-                               (view_x, view_y), (view_w, view_h));
-            }
-
+        fn draw_player(
+            player: &Player,
+            gl: &mut GlGraphics,
+            transform: [[f64; 3]; 2],
+            view: (i32, i32),
+            ticks: u32,
+        ) {
             let pos = (player.x as i32, player.y as i32);
             let offset = (player.offset_x as i32, player.offset_y as i32);
-
-            let transform = c.transform.clone().zoom(SCALE);
 
             let player_ticks = match player.last_move_start {
                 Some(start) => ticks - start,
@@ -333,11 +331,32 @@ impl App {
                 let image = image_for_texture(&player.accessory, pos, view, offset, None, player.dir);
                 image.draw(&player.accessory.0, &Default::default(), transform, gl);
             }
+        }
+
+        self.gl.draw(args.viewport(), |c, gl| {
+            // Clear the screen.
+            clear(BLACK, gl);
+
+            let transform = c.transform.zoom(SCALE);
+
+            for (i, (layer, resolved)) in layers.iter().zip(resolved_layers).enumerate() {
+                if i == layers.len() - 1 {
+                    break;
+                }
+                let player = if i == 1 { Some(player) } else { None };
+                draw_layer(layer, resolved, transform, gl, ticks,
+                           (view_x, view_y), (view_w, view_h), player);
+            }
+
+            for character in characters {
+                draw_character(character, transform, gl,
+                               (view_x, view_y), (view_w, view_h));
+            }
 
             draw_layer(layers.last().unwrap(),
                        resolved_layers.last().unwrap(),
                        transform, gl, ticks,
-                       (view_x, view_y), (view_w, view_h));
+                       (view_x, view_y), (view_w, view_h), None);
         });
     }
 
@@ -684,10 +703,18 @@ fn main() {
     let base = Path::new("../xnb/uncompressed");
     let f = File::open(base.join("Maps").join(&map_name)).unwrap();
     let xnb = XNB::from_buffer(f).unwrap();
-    let map = match xnb.primary {
+    let mut map = match xnb.primary {
         Asset::Tide(map) => map,
         _ => panic!("unexpected xnb contents"),
     };
+
+    for layer in &mut map.layers {
+        layer.tiles.sort_by(|t1, t2| {
+            let (t1_x, t1_y) = t1.get_pos();
+            let (t2_x, t2_y) = t2.get_pos();
+            t1_y.cmp(&t2_y).then_with(|| t1_x.cmp(&t2_x))
+        });
+    }
 
     let event = event_id.and_then(|id| {
         let f = File::open(base.join("Data/Events").join(&map_name)).ok();
