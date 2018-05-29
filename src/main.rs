@@ -16,7 +16,7 @@ use std::env;
 use std::fs::File;
 use std::path::Path;
 use squish::{decompress_image, CompressType};
-use xnb::{XNB, Asset, DictionaryKey, SurfaceFormat};
+use xnb::{XNB, SurfaceFormat, Texture2d, Dictionary};
 use xnb::tide::{TileSheet, Layer, Map};
 
 const SCALE: f64 = 1.5;
@@ -654,29 +654,25 @@ fn characters_for_event(event: &ScriptedEvent, path: &Path) -> Vec<Character> {
 }
 
 fn load_texture(base: &Path, filename: &str) -> Texture {
-    let f = File::open(base.join(filename)).unwrap();
-    let xnb = XNB::from_buffer(f).unwrap();
-    match xnb.primary {
-        Asset::Texture2d(mut texture) => {
-            let data = texture.mip_data.remove(0);
-            let data = match texture.format {
-                SurfaceFormat::Dxt3 => {
-                    decompress_image(texture.width as i32,
-                                     texture.height as i32,
-                                     data.as_ptr() as *const _,
-                                     CompressType::Dxt3)
-                }
-                _ => data,
-            };
-            let img = RgbaImage::from_raw(texture.width as u32,
-                                          texture.height as u32,
-                                          data).unwrap();
-            let mut settings = TextureSettings::new();
-            settings.set_filter(Filter::Nearest);
-            Texture::from_image(&img, &settings)
+    let mut f = File::open(base.join(filename)).unwrap();
+    let xnb = XNB::<Texture2d>::from_buffer(&mut f).unwrap();
+    let mut texture = xnb.primary;
+    let data = texture.mip_data.remove(0);
+    let data = match texture.format {
+        SurfaceFormat::Dxt3 => {
+            decompress_image(texture.width as i32,
+                             texture.height as i32,
+                             data.as_ptr() as *const _,
+                             CompressType::Dxt3)
         }
-        _ => panic!("unexpected xnb contents"),
-    }
+        _ => data,
+    };
+    let img = RgbaImage::from_raw(texture.width as u32,
+                                  texture.height as u32,
+                                  data).unwrap();
+    let mut settings = TextureSettings::new();
+    settings.set_filter(Filter::Nearest);
+    Texture::from_image(&img, &settings)
 }
 
 fn main() {
@@ -701,12 +697,9 @@ fn main() {
     let mut view_y = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     let base = Path::new("../xnb/uncompressed");
-    let f = File::open(base.join("Maps").join(&map_name)).unwrap();
-    let xnb = XNB::from_buffer(f).unwrap();
-    let mut map = match xnb.primary {
-        Asset::Tide(map) => map,
-        _ => panic!("unexpected xnb contents"),
-    };
+    let mut f = File::open(base.join("Maps").join(&map_name)).unwrap();
+    let xnb = XNB::<Map>::from_buffer(&mut f).unwrap();
+    let mut map = xnb.primary;
 
     for layer in &mut map.layers {
         layer.tiles.sort_by(|t1, t2| {
@@ -718,23 +711,14 @@ fn main() {
 
     let event = event_id.and_then(|id| {
         let f = File::open(base.join("Data/Events").join(&map_name)).ok();
-        let event = f.and_then(|f| {
-            let xnb = XNB::from_buffer(f).unwrap();
-            match xnb.primary {
-                Asset::Dictionary(ref d) => {
-                    for (k, v) in &d.map {
-                        if let DictionaryKey::String(ref s) = *k {
-                            if s.split('/').next() == Some(&id) {
-                                if let Asset::String(ref s) = *v {
-                                    return Some(s.clone());
-                                }
-                            }
-                        }
-                    }
-                    None
+        let event = f.and_then(|mut f| {
+            let xnb = XNB::<Dictionary<String, String>>::from_buffer(&mut f).unwrap();
+            for (k, v) in &xnb.primary.map {
+                if k.split('/').next() == Some(&id) {
+                    return Some(v.clone());
                 }
-                _ => panic!("unexpected event xnb contents"),
             }
+            None
         });
         if let Some(ref event) = event {
             println!("got event source:\n{}", event);
