@@ -17,13 +17,111 @@ use std::fs::File;
 use std::path::Path;
 use squish::{decompress_image, CompressType};
 use xnb::{XNB, SurfaceFormat, Texture2d, Dictionary};
-use xnb::tide::{TileSheet, Layer, Map};
+use xnb::tide::{TileSheet, Layer, Map, PropertyValue, PropertyParse};
 
 const SCALE: f64 = 1.5;
 
+type SVMap = Map<MapProps, TilesetProps, LayerProps, TileProps>;
+
+struct LayerProps;
+impl PropertyParse for LayerProps {
+    fn parse(_props: Vec<(String, PropertyValue)>) -> Self {
+        LayerProps
+    }
+}
+
+struct MapProps;
+impl PropertyParse for MapProps {
+    fn parse(_props: Vec<(String, PropertyValue)>) -> Self {
+        MapProps
+    }
+}
+
+struct TileProps {
+    passable: Option<bool>,
+}
+impl PropertyParse for TileProps {
+    fn parse(props: Vec<(String, PropertyValue)>) -> Self {
+        let mut passable = None;
+        for (k, v) in props {
+            match (k.as_ref(), v) {
+                ("Passable", PropertyValue::String(b)) => {
+                    println!("passable is {:?}", b);
+                    passable = Some(b == "T")
+                }
+                ("Passable", v) => println!("passable: {:?}", v),
+                (k, v) => println!("tile: {} = {:?}", k, v),
+            }
+        }
+
+        Self {
+            passable: passable
+        }
+    }
+}
+
+enum TileType {
+    Grass,
+    Stone,
+    Dirt,
+    Wood,
+}
+
+struct TilesetProps {
+    passable: Vec<(u32, bool)>,
+    water: Vec<(u32, bool)>,
+    types: Vec<(u32, TileType)>,
+}
+
+impl TilesetProps {
+    fn tile_is_passable(&self, idx: u32) -> Option<bool> {
+        self.passable.iter().find(|&&(i, _v)| i == idx).map(|&(_, v)| v)
+    }
+}
+
+impl PropertyParse for TilesetProps {
+    fn parse(_props: Vec<(String, PropertyValue)>) -> Self {
+        let mut passable = vec![];
+        let mut water = vec![];
+        let mut types = vec![];
+
+        for (k, v) in _props {
+            let mut parts = k.split('@');
+            let _ = parts.next();
+            let category = parts.next().unwrap();
+            if category != "TileIndex" {
+                continue;
+            }
+            let idx = parts.next().unwrap().parse().unwrap();
+            let name = parts.next().unwrap();
+            match (name, v) {
+                ("Spawnable", _) => (),
+                ("Diggable", _) => (),
+                ("PathType", _) => (),
+                ("Shadow", _) => (),
+                ("Passable", PropertyValue::String(ref s)) => passable.push((idx, s == "T")),
+                ("Water", PropertyValue::String(ref s)) => water.push((idx, s == "T")),
+                ("Type", PropertyValue::String(ref s)) => types.push((idx, match s.as_ref() {
+                    "Dirt" => TileType::Dirt,
+                    "Stone" => TileType::Stone,
+                    "Grass" => TileType::Grass,
+                    "Wood" => TileType::Wood,
+                    s => panic!("unexpected tile type: {}", s),
+                })),
+                (s, v) => panic!("unexpected property {}: {:?}", s, v),
+            }
+        }
+        TilesetProps {
+            passable: passable,
+            water: water,
+            types: types,
+        }
+    }
+}
+
 struct ResolvedTile<'a> {
     texture: &'a Texture,
-    tilesheet: &'a TileSheet,
+    tilesheet: &'a TileSheet<TilesetProps>,
 }
 
 struct Character {
@@ -52,7 +150,7 @@ pub struct App {
 }
 
 struct Tile<'a> {
-    sheet: &'a TileSheet,
+    sheet: &'a TileSheet<TilesetProps>,
     index: u32,
 }
 
@@ -210,7 +308,7 @@ impl App {
               args: &RenderArgs,
               player: &Player,
               characters: &[Character],
-              layers: &[Layer],
+              layers: &[Layer<LayerProps, TileProps>],
               resolved_layers: &[Vec<ResolvedTile>]) {
         use graphics::*;
 
@@ -243,7 +341,7 @@ impl App {
             image.draw(&character.texture.0, &Default::default(), transform, gl);
         }
 
-        fn draw_layer(layer: &Layer,
+        fn draw_layer(layer: &Layer<LayerProps, TileProps>,
                       resolved_tiles: &[ResolvedTile],
                       transform: [[f64; 3]; 2],
                       gl: &mut GlGraphics,
@@ -389,7 +487,7 @@ impl App {
         }
     }
 
-    fn update(&mut self, args: &UpdateArgs, player: &mut Player, map: &Map) {
+    fn update(&mut self, args: &UpdateArgs, player: &mut Player, map: &SVMap) {
         self.ticks += (args.dt * 1000.) as u32;
 
         if self.update_last_move {
@@ -436,7 +534,9 @@ impl App {
         for tile in &layer.tiles {
             let (tx, ty) = tile.get_pos();
             if (tx as i32, ty as i32) == (adjusted_x, adjusted_y + 1) {
-                clamp_to_current_pos = true;
+                let tilesheet = map.tilesheet(tile.get_tilesheet()).unwrap();
+                let passable = tilesheet.properties.tile_is_passable(tile.get_index(0)).unwrap_or(false);
+                clamp_to_current_pos = !passable;
                 break;
             }
         }
@@ -698,7 +798,7 @@ fn main() {
 
     let base = Path::new("../xnb/uncompressed");
     let mut f = File::open(base.join("Maps").join(&map_name)).unwrap();
-    let xnb = XNB::<Map>::from_buffer(&mut f).unwrap();
+    let xnb = XNB::<SVMap>::from_buffer(&mut f).unwrap();
     let mut map = xnb.primary;
 
     for layer in &mut map.layers {
